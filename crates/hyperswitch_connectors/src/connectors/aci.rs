@@ -62,7 +62,6 @@ use hyperswitch_interfaces::{
 };
 use hyperswitch_masking::{Mask, PeekInterface};
 use ring::aead::{self, UnboundKey};
-use serde_urlencoded;
 use transformers as aci;
 
 use crate::{
@@ -261,9 +260,7 @@ impl ConnectorIntegration<SetupMandate, SetupMandateRequestData, PaymentsRespons
         _connectors: &Connectors,
     ) -> CustomResult<RequestContent, errors::ConnectorError> {
         let connector_req = aci::AciMandateRequest::try_from(req)?;
-        let body = serde_urlencoded::to_string(&connector_req)
-            .map_err(|_| errors::ConnectorError::RequestEncodingFailed)?;
-        Ok(RequestContent::RawBytes(body.into_bytes()))
+        Ok(RequestContent::FormUrlEncoded(Box::new(connector_req)))
     }
 
     fn build_request(
@@ -361,9 +358,7 @@ impl ConnectorIntegration<Capture, PaymentsCaptureData, PaymentsResponseData> fo
         )?;
         let connector_router_data = aci::AciRouterData::from((amount, req));
         let connector_req = aci::AciCaptureRequest::try_from(&connector_router_data)?;
-        let body = serde_urlencoded::to_string(&connector_req)
-            .map_err(|_| errors::ConnectorError::RequestEncodingFailed)?;
-        Ok(RequestContent::RawBytes(body.into_bytes()))
+        Ok(RequestContent::FormUrlEncoded(Box::new(connector_req)))
     }
 
     fn build_request(
@@ -550,10 +545,7 @@ impl ConnectorIntegration<Authorize, PaymentsAuthorizeData, PaymentsResponseData
 
         let connector_router_data = aci::AciRouterData::from((amount, req));
         let connector_req = aci::AciPaymentsRequest::try_from(&connector_router_data)?;
-        let body = serde_urlencoded::to_string(&connector_req)
-            .map_err(|_| errors::ConnectorError::RequestEncodingFailed)?;
-        router_env::logger::debug!(aci_request_body = %body);
-        Ok(RequestContent::RawBytes(body.into_bytes()))
+        Ok(RequestContent::FormUrlEncoded(Box::new(connector_req)))
     }
 
     fn build_request(
@@ -640,9 +632,7 @@ impl ConnectorIntegration<Void, PaymentsCancelData, PaymentsResponseData> for Ac
         _connectors: &Connectors,
     ) -> CustomResult<RequestContent, errors::ConnectorError> {
         let connector_req = aci::AciCancelRequest::try_from(req)?;
-        let body = serde_urlencoded::to_string(&connector_req)
-            .map_err(|_| errors::ConnectorError::RequestEncodingFailed)?;
-        Ok(RequestContent::RawBytes(body.into_bytes()))
+        Ok(RequestContent::FormUrlEncoded(Box::new(connector_req)))
     }
     fn build_request(
         &self,
@@ -739,9 +729,7 @@ impl ConnectorIntegration<Execute, RefundsData, RefundsResponseData> for Aci {
 
         let connector_router_data = aci::AciRouterData::from((amount, req));
         let connector_req = aci::AciRefundRequest::try_from(&connector_router_data)?;
-        let body = serde_urlencoded::to_string(&connector_req)
-            .map_err(|_| errors::ConnectorError::RequestEncodingFailed)?;
-        Ok(RequestContent::RawBytes(body.into_bytes()))
+        Ok(RequestContent::FormUrlEncoded(Box::new(connector_req)))
     }
 
     fn build_request(
@@ -836,9 +824,7 @@ impl ConnectorIntegration<PreAuthentication, PreAuthNRequestData, Authentication
         _connectors: &Connectors,
     ) -> CustomResult<RequestContent, errors::ConnectorError> {
         let connector_req = aci::AciStandaloneThreeDsRequest::try_from(req)?;
-        let body = serde_urlencoded::to_string(&connector_req)
-            .map_err(|_| errors::ConnectorError::RequestEncodingFailed)?;
-        Ok(RequestContent::RawBytes(body.into_bytes()))
+        Ok(RequestContent::FormUrlEncoded(Box::new(connector_req)))
     }
 
     fn build_request(
