@@ -538,16 +538,30 @@ impl ForexRateProvider for ForexProvider {
     }
 }
 
-/// Fetch from `primary`, falling back to `fallback` on any error.
+/// Fetch from `primary`, falling back to `fallback` on any error. When *both* fail, a single
+/// `forex_all_providers_failed` line names both providers and the fallback's error is annotated
+/// with the cross-provider context, so the total failure is not anonymous in the returned report.
 async fn fetch_with_fallback(
     primary: &impl ForexRateProvider,
     fallback: &impl ForexRateProvider,
 ) -> Result<ExchangeRates, error_stack::Report<ForexError>> {
     match primary.fetch_rates().await {
         Ok(rates) => Ok(rates),
-        Err(error) => {
-            logger::error!(forex_error = ?error, primary = primary.name(), "primary_forex_error");
-            fallback.fetch_rates().await
+        Err(primary_error) => {
+            logger::error!(forex_error = ?primary_error, primary = primary.name(), "primary_forex_error");
+            fallback.fetch_rates().await.map_err(|fallback_error| {
+                logger::error!(
+                    primary = primary.name(),
+                    fallback = fallback.name(),
+                    forex_error = ?fallback_error,
+                    "forex_all_providers_failed: primary and fallback both failed"
+                );
+                fallback_error.attach_printable(format!(
+                    "fallback provider `{}` also failed after primary `{}`",
+                    fallback.name(),
+                    primary.name(),
+                ))
+            })
         }
     }
 }
@@ -952,6 +966,13 @@ mod tests {
             name: "fallback",
             result: Err(ForexError::ApiUnresponsive),
         };
-        assert!(fetch_with_fallback(&primary, &fallback).await.is_err());
+        let err = fetch_with_fallback(&primary, &fallback).await.unwrap_err();
+        // The returned report carries cross-provider context (see `forex_all_providers_failed`).
+        let rendered = format!("{err:?}");
+        assert!(
+            rendered.contains("fallback provider")
+                && rendered.contains("also failed after primary"),
+            "missing cross-provider context in both-failed error: {rendered}"
+        );
     }
 }

@@ -658,3 +658,83 @@ pub(crate) async fn fetch_raw_secrets(
         save_payment_method_on_session: conf.save_payment_method_on_session,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use hyperswitch_masking::{PeekInterface, Secret};
+
+    use super::*;
+
+    /// Test double for the secret manager: tags whatever it resolves, so a resolved key is
+    /// distinguishable from a raw (unresolved) one in assertions.
+    struct MarkerClient;
+
+    #[async_trait::async_trait]
+    impl SecretManagementInterface for MarkerClient {
+        async fn get_secret(
+            &self,
+            input: Secret<String>,
+        ) -> CustomResult<Secret<String>, SecretsManagementError> {
+            Ok(Secret::new(format!("resolved::{}", input.peek())))
+        }
+    }
+
+    fn secured(
+        value: serde_json::Value,
+    ) -> SecretStateContainer<settings::ForexApi, SecuredSecret> {
+        serde_json::from_value(value).expect("forex_api config should deserialize")
+    }
+
+    // Only the active primary/fallback providers' keys are resolved, each into its own field; an
+    // inactive provider's key field keeps its raw (unresolved) value — the invariant `key_for` /
+    // `ForexProvider::from_config` rely on.
+    #[tokio::test]
+    async fn resolves_only_active_providers_and_maps_each_to_its_field() {
+        let value = secured(serde_json::json!({
+            "provider": "fixer",
+            "fallback_provider": "currency_layer",
+            "api_key": "oer-raw",
+            "fallback_api_key": "cl-raw",
+            "fixer_api_key": "fx-raw",
+            "data_expiration_delay_in_seconds": 21600,
+            "redis_lock_timeout_in_seconds": 100,
+            "redis_ttl_in_seconds": 172800,
+        }));
+
+        let raw = settings::ForexApi::convert_to_raw_secret(value, &MarkerClient)
+            .await
+            .expect("secret resolution should succeed");
+        let forex_api = raw.get_inner();
+
+        // Active primary (Fixer) and fallback (Currency Layer) resolved into their own fields.
+        assert_eq!(forex_api.fixer_api_key.peek(), "resolved::fx-raw");
+        assert_eq!(forex_api.fallback_api_key.peek(), "resolved::cl-raw");
+        // Inactive provider (OER) left untouched.
+        assert_eq!(forex_api.api_key.peek(), "oer-raw");
+    }
+
+    // Same provider in both slots: its single key field is resolved (the join resolves it twice
+    // with the same value); the other providers' fields stay raw.
+    #[tokio::test]
+    async fn resolves_when_primary_equals_fallback() {
+        let value = secured(serde_json::json!({
+            "provider": "open_exchange_rates",
+            "fallback_provider": "open_exchange_rates",
+            "api_key": "oer-raw",
+            "fallback_api_key": "cl-raw",
+            "fixer_api_key": "fx-raw",
+            "data_expiration_delay_in_seconds": 21600,
+            "redis_lock_timeout_in_seconds": 100,
+            "redis_ttl_in_seconds": 172800,
+        }));
+
+        let raw = settings::ForexApi::convert_to_raw_secret(value, &MarkerClient)
+            .await
+            .expect("secret resolution should succeed");
+        let forex_api = raw.get_inner();
+
+        assert_eq!(forex_api.api_key.peek(), "resolved::oer-raw");
+        assert_eq!(forex_api.fallback_api_key.peek(), "cl-raw");
+        assert_eq!(forex_api.fixer_api_key.peek(), "fx-raw");
+    }
+}
