@@ -8,7 +8,7 @@ use hyperswitch_domain_models::{
     router_flow_types::{Execute, RSync},
     router_request_types::ResponseId,
     router_response_types::{PaymentsResponseData, RedirectForm, RefundsResponseData},
-    types::{PaymentsAuthorizeRouterData, RefundsRouterData},
+    types::{PaymentsAuthorizeRouterData, RefundsRouterData, SetupMandateRouterData},
 };
 use hyperswitch_interfaces::errors::ConnectorError;
 use hyperswitch_masking::Secret;
@@ -224,6 +224,47 @@ impl<const T: u8> TryFrom<&DummyConnectorRouterData<&PaymentsAuthorizeRouterData
             };
         Ok(Self {
             amount: item.router_data.request.minor_amount,
+            currency: item.router_data.request.currency,
+            payment_method_data: payment_method_data?,
+            return_url: item.router_data.request.router_return_url.clone(),
+            connector: Into::<DummyConnectors>::into(T),
+        })
+    }
+}
+
+impl<const T: u8> TryFrom<&DummyConnectorRouterData<&SetupMandateRouterData>>
+    for DummyConnectorPaymentsRequest<T>
+{
+    type Error = error_stack::Report<ConnectorError>;
+    fn try_from(
+        item: &DummyConnectorRouterData<&SetupMandateRouterData>,
+    ) -> Result<Self, Self::Error> {
+        let payment_method_data: Result<DummyPaymentMethodData, Self::Error> =
+            match item.router_data.request.payment_method_data {
+                PaymentMethodData::Card(ref req_card) => {
+                    let card_holder_name = item.router_data.get_optional_billing_full_name();
+                    Ok(DummyPaymentMethodData::Card(DummyConnectorCard::try_from(
+                        (req_card.clone(), card_holder_name),
+                    )?))
+                }
+                PaymentMethodData::Upi(ref req_upi_data) => match req_upi_data {
+                    UpiData::UpiCollect(data) => Ok(DummyPaymentMethodData::Upi(
+                        DummyConnectorUpi::try_from(data.clone())?,
+                    )),
+                    UpiData::UpiIntent(_) | UpiData::UpiQr(_) => {
+                        Err(ConnectorError::NotImplemented("UPI flow".to_string()).into())
+                    }
+                },
+                PaymentMethodData::Wallet(ref wallet_data) => Ok(DummyPaymentMethodData::Wallet(
+                    wallet_data.clone().try_into()?,
+                )),
+                PaymentMethodData::PayLater(ref pay_later_data) => Ok(
+                    DummyPaymentMethodData::PayLater(pay_later_data.clone().try_into()?),
+                ),
+                _ => Err(ConnectorError::NotImplemented("Payment methods".to_string()).into()),
+            };
+        Ok(Self {
+            amount: item.amount,
             currency: item.router_data.request.currency,
             payment_method_data: payment_method_data?,
             return_url: item.router_data.request.router_return_url.clone(),

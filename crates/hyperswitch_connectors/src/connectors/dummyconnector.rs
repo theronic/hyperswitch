@@ -24,7 +24,7 @@ use hyperswitch_domain_models::{
     router_response_types::{PaymentsResponseData, RefundsResponseData},
     types::{
         PaymentsAuthorizeRouterData, PaymentsCaptureRouterData, PaymentsSyncRouterData,
-        RefundSyncRouterData, RefundsRouterData,
+        RefundSyncRouterData, RefundsRouterData, SetupMandateRouterData,
     },
 };
 use hyperswitch_interfaces::{
@@ -39,7 +39,7 @@ use hyperswitch_interfaces::{
     events::connector_api_logs::ConnectorEvent,
     types::{
         PaymentsAuthorizeType, PaymentsCaptureType, PaymentsSyncType, RefundExecuteType,
-        RefundSyncType, Response,
+        RefundSyncType, Response, SetupMandateType,
     },
     webhooks::{IncomingWebhook, IncomingWebhookRequestDetails, WebhookContext},
 };
@@ -200,15 +200,94 @@ impl<const T: u8> ConnectorIntegration<AccessTokenAuth, AccessTokenRequestData, 
 impl<const T: u8> ConnectorIntegration<SetupMandate, SetupMandateRequestData, PaymentsResponseData>
     for DummyConnector<T>
 {
+    fn get_headers(
+        &self,
+        req: &SetupMandateRouterData,
+        connectors: &Connectors,
+    ) -> CustomResult<Vec<(String, Maskable<String>)>, ConnectorError> {
+        self.build_headers(req, connectors)
+    }
+
+    fn get_content_type(&self) -> &'static str {
+        self.common_get_content_type()
+    }
+
+    fn get_url(
+        &self,
+        req: &SetupMandateRouterData,
+        connectors: &Connectors,
+    ) -> CustomResult<String, ConnectorError> {
+        match req.payment_method {
+            PaymentMethod::Card
+            | PaymentMethod::Upi
+            | PaymentMethod::Wallet
+            | PaymentMethod::PayLater => Ok(format!("{}/payment", self.base_url(connectors))),
+            _ => Err(error_stack::report!(ConnectorError::NotSupported {
+                message: format!("The payment method {} is not supported", req.payment_method),
+                connector: Into::<transformers::DummyConnectors>::into(T).get_dummy_connector_id(),
+            })),
+        }
+    }
+
+    fn get_request_body(
+        &self,
+        req: &SetupMandateRouterData,
+        _connectors: &Connectors,
+    ) -> CustomResult<RequestContent, ConnectorError> {
+        let amount = convert_amount(
+            self.amount_converter,
+            MinorUnit::zero(),
+            req.request.currency,
+        )?;
+
+        let connector_router_data = dummyconnector::DummyConnectorRouterData::from((amount, req));
+        let connector_req =
+            transformers::DummyConnectorPaymentsRequest::<T>::try_from(&connector_router_data)?;
+        Ok(RequestContent::Json(Box::new(connector_req)))
+    }
+
     fn build_request(
         &self,
-        _req: &RouterData<SetupMandate, SetupMandateRequestData, PaymentsResponseData>,
-        _connectors: &Connectors,
+        req: &SetupMandateRouterData,
+        connectors: &Connectors,
     ) -> CustomResult<Option<Request>, ConnectorError> {
-        Err(
-            ConnectorError::NotImplemented("Setup Mandate flow for DummyConnector".to_string())
-                .into(),
-        )
+        Ok(Some(
+            RequestBuilder::new()
+                .method(Method::Post)
+                .url(&SetupMandateType::get_url(self, req, connectors)?)
+                .attach_default_headers()
+                .headers(SetupMandateType::get_headers(self, req, connectors)?)
+                .set_body(SetupMandateType::get_request_body(self, req, connectors)?)
+                .build(),
+        ))
+    }
+
+    fn handle_response(
+        &self,
+        data: &SetupMandateRouterData,
+        event_builder: Option<&mut ConnectorEvent>,
+        res: Response,
+    ) -> CustomResult<SetupMandateRouterData, ConnectorError> {
+        let response: transformers::PaymentsResponse = res
+            .response
+            .parse_struct("DummyConnector PaymentsResponse")
+            .change_context(ConnectorError::ResponseDeserializationFailed)?;
+        event_builder.map(|i| i.set_response_body(&response));
+        router_env::logger::info!(connector_response=?response);
+        RouterData::try_from(ResponseRouterData {
+            response,
+            data: data.clone(),
+            http_code: res.status_code,
+        })
+        .change_context(ConnectorError::ResponseHandlingFailed)
+    }
+
+    fn get_error_response(
+        &self,
+        res: Response,
+        event_builder: Option<&mut ConnectorEvent>,
+    ) -> CustomResult<ErrorResponse, ConnectorError> {
+        self.build_error_response(res, event_builder)
     }
 }
 
