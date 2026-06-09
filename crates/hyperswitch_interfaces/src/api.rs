@@ -13,6 +13,8 @@ pub mod fraud_check;
 #[cfg(feature = "frm")]
 pub mod fraud_check_v2;
 pub mod gateway;
+#[cfg(feature = "limits")]
+pub mod limits;
 pub mod merchant_connector_webhook_management;
 pub mod merchant_connector_webhook_management_v2;
 pub mod payments;
@@ -89,6 +91,8 @@ use serde_json::json;
 pub use self::fraud_check::*;
 #[cfg(feature = "frm")]
 pub use self::fraud_check_v2::*;
+#[cfg(feature = "limits")]
+pub use self::limits::*;
 #[cfg(feature = "payouts")]
 pub use self::payouts::*;
 #[cfg(feature = "payouts")]

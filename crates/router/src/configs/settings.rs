@@ -152,6 +152,8 @@ pub struct Settings<S: SecretState> {
     pub kv_config: KvConfig,
     #[cfg(feature = "frm")]
     pub frm: Frm,
+    #[cfg(feature = "limits")]
+    pub limits: Limits,
     #[cfg(feature = "olap")]
     pub report_download_config: ReportConfig,
     #[cfg(feature = "olap")]
@@ -372,6 +374,58 @@ pub struct UnmaskedHeaders {
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct Frm {
     pub enabled: bool,
+}
+
+/// Global gate + provider configuration for the generic spending-limits
+/// connector (mirrors [`Frm`]).
+///
+/// `enabled` is the global gate (parallel to `frm.enabled`). The remaining
+/// fields are the default provider configuration; Phase 5 sources the
+/// per-charge [`crate::core::limits::LimitsProfileConfig`] from these settings
+/// (the per-profile `limits_configs` table is a later phase).
+#[cfg(feature = "limits")]
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct Limits {
+    /// Global gate: when `false`, no charge is ever evaluated.
+    pub enabled: bool,
+    /// Base URL of the limits provider (e.g. `https://mypeach.example`).
+    #[serde(default)]
+    pub provider_base_url: String,
+    /// HMAC secret used to sign outbound provider requests.
+    #[serde(default)]
+    pub hmac_secret: Secret<String>,
+    /// When `true` (default), only agentic charges trigger a limits check.
+    #[serde(default = "limits_default_trigger_agentic_only")]
+    pub trigger_agentic_only: bool,
+    /// Fail-mode on provider unavailability: `true` blocks (fail-closed).
+    #[serde(default = "limits_default_fail_closed")]
+    pub fail_closed: bool,
+    /// Per-call timeout in milliseconds.
+    #[serde(default = "limits_default_timeout_ms")]
+    pub timeout_ms: u64,
+    /// Consecutive failures before the circuit breaker opens.
+    #[serde(default = "limits_default_circuit_breaker_threshold")]
+    pub circuit_breaker_threshold: u32,
+}
+
+#[cfg(feature = "limits")]
+fn limits_default_trigger_agentic_only() -> bool {
+    true
+}
+
+#[cfg(feature = "limits")]
+fn limits_default_fail_closed() -> bool {
+    true
+}
+
+#[cfg(feature = "limits")]
+fn limits_default_timeout_ms() -> u64 {
+    crate::core::limits::config::DEFAULT_TIMEOUT_MS
+}
+
+#[cfg(feature = "limits")]
+fn limits_default_circuit_breaker_threshold() -> u32 {
+    crate::core::limits::config::DEFAULT_CIRCUIT_BREAKER_THRESHOLD
 }
 
 #[derive(Debug, Deserialize, Clone)]

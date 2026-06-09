@@ -2920,6 +2920,29 @@ async fn payment_response_update_tracker<F: Clone, T: types::Capturable>(
             .map(|info| info.status = status)
     });
 
+    // Agentic spending-limits settle (CC1, best-effort): on a terminal attempt
+    // status, commit/void the reservation stashed at evaluate time. No-op when
+    // limits are disabled or no reservation was recorded. Gated by
+    // `limits.enabled`.
+    #[cfg(feature = "limits")]
+    {
+        let status = payment_data.payment_attempt.status;
+        let tx_id = payment_data
+            .payment_intent
+            .payment_id
+            .get_string_repr()
+            .to_string();
+        let captured_amount_minor = matches!(
+            status,
+            enums::AttemptStatus::Charged
+                | enums::AttemptStatus::PartialCharged
+                | enums::AttemptStatus::PartialChargedAndChargeable
+        )
+        .then(|| payment_data.payment_attempt.get_total_amount().get_amount_as_i64());
+        crate::core::limits::settle_on_terminal(state, tx_id, status, captured_amount_minor, None)
+            .await;
+    }
+
     if payment_data.payment_attempt.status == enums::AttemptStatus::Failure {
         let _ = card_testing_guard_utils::increment_blocked_count_in_cache(
             state,

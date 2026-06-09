@@ -614,6 +614,8 @@ pub(crate) async fn fetch_raw_secrets(
         kv_config: conf.kv_config,
         #[cfg(feature = "frm")]
         frm: conf.frm,
+        #[cfg(feature = "limits")]
+        limits: conf.limits,
         #[cfg(feature = "olap")]
         report_download_config: conf.report_download_config,
         events: conf.events,

@@ -299,6 +299,27 @@ impl<F: Clone + Sync> UpdateTracker<F, PaymentData<F>, api::PaymentsCancelReques
             )
             .await
             .to_not_found_response(errors::ApiErrorResponse::PaymentNotFound)?;
+
+        // Agentic spending-limits settle (CC1, best-effort): a no-connector void
+        // is terminal, so void the reservation stashed at evaluate time. No-op
+        // when limits are disabled or no reservation was recorded.
+        #[cfg(feature = "limits")]
+        {
+            let tx_id = payment_data
+                .payment_intent
+                .payment_id
+                .get_string_repr()
+                .to_string();
+            crate::core::limits::settle_on_terminal(
+                state,
+                tx_id,
+                attempt_status_update,
+                None,
+                None,
+            )
+            .await;
+        }
+
         req_state
             .event_context
             .event(AuditEvent::new(AuditEventType::PaymentCancelled {

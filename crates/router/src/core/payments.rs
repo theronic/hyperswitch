@@ -1650,6 +1650,19 @@ where
         .await
         .to_not_found_response(errors::ApiErrorResponse::CustomerNotFound)
         .attach_printable("Failed while fetching/creating customer")?;
+
+    // Agentic spending-limits check on the proxy (MIT/recurring) path. Blocks
+    // the charge before it reaches the connector when a limit is exceeded;
+    // records the block as a failed attempt (R12). Gated by `limits.enabled`.
+    #[cfg(feature = "limits")]
+    crate::core::limits::evaluate_and_record(
+        state,
+        &mut payment_data,
+        platform.get_processor(),
+        &business_profile,
+    )
+    .await?;
+
     let (router_data, mca) = proxy_for_call_connector_service(
         state,
         req_state.clone(),
@@ -5038,6 +5051,18 @@ where
             &connector,
         )
         .await?;
+
+    // Agentic spending-limits check (post-surcharge, pre-dispatch). Blocks the
+    // charge before it reaches the connector when a limit is exceeded; records
+    // the block as a failed attempt (R12). Gated by `limits.enabled`.
+    #[cfg(feature = "limits")]
+    crate::core::limits::evaluate_and_record(
+        state,
+        payment_data,
+        platform.get_processor(),
+        business_profile,
+    )
+    .await?;
 
     let (pd, tokenization_action) = get_connector_tokenization_action_when_confirm_true(
         state,

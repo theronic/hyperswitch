@@ -13,6 +13,7 @@ v1 = ["hyperswitch_domain_models/v1", "api_models/v1", "common_utils/v1"]
 v2 = ["api_models/v2", "common_utils/v2", "hyperswitch_domain_models/v2"]
 payouts = ["hyperswitch_domain_models/payouts"]
 frm = ["hyperswitch_domain_models/frm"]
+limits = []
 revenue_recovery = []
 
 [dependencies]

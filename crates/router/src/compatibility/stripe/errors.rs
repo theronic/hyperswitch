@@ -713,6 +713,16 @@ impl From<errors::ApiErrorResponse> for StripeErrorCode {
             errors::ApiErrorResponse::SubscriptionError { operation } => {
                 Self::SubscriptionError { operation }
             }
+            errors::ApiErrorResponse::AgenticLimitExceeded {
+                scope,
+                period,
+                reason,
+                ..
+            } => Self::InvalidRequestData {
+                message: format!(
+                    "Agentic spending limit exceeded for {scope} {period} limit ({reason})"
+                ),
+            },
         }
     }
 }

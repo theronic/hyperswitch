@@ -339,6 +339,26 @@ pub enum ApiErrorResponse {
         message = "Access forbidden, expired JWT token was used"
     )]
     ExpiredJwtToken,
+    #[error(
+        error_type = ErrorType::InvalidRequestError, code = "IR_AGENTIC_LIMIT",
+        message = "Agentic spending limit exceeded for {scope} {period} limit"
+    )]
+    AgenticLimitExceeded {
+        /// The limit scope that produced the decision (e.g. payment_method/merchant/global).
+        scope: String,
+        /// The limit period that produced the decision (e.g. day/week/month).
+        period: String,
+        /// Currency of the reported `used_minor`/`max_minor`/`attempted_minor` values.
+        currency: String,
+        /// Amount already used within the window, in minor units.
+        used_minor: i64,
+        /// Configured limit for the window, in minor units.
+        max_minor: i64,
+        /// The charge amount (converted into the limit currency), in minor units.
+        attempted_minor: i64,
+        /// Machine-readable decline reason.
+        reason: String,
+    },
 }
 
 #[derive(Clone)]
@@ -742,6 +762,26 @@ impl ErrorSwitch<api_models::errors::types::ApiErrorResponse> for ApiErrorRespon
                 AER::BadRequest(ApiError::new("CE", 9, format!("Subscription operation: {operation} failed with connector"), None))
             }
             Self::ExpiredJwtToken => AER::Unauthorized(ApiError::new("IR", 48, "Access forbidden, expired JWT token was used", None)),
+            Self::AgenticLimitExceeded { scope, period, currency, used_minor, max_minor, attempted_minor, reason } => {
+                AER::BadRequest(ApiError::new(
+                    "IR",
+                    52,
+                    format!("Agentic spending limit exceeded for {scope} {period} limit"),
+                    Some(Extra {
+                        data: Some(serde_json::json!({
+                            "kind": "agentic_limit_exceeded",
+                            "scope": scope,
+                            "period": period,
+                            "currency": currency,
+                            "used_minor": used_minor,
+                            "max_minor": max_minor,
+                            "attempted_minor": attempted_minor,
+                            "reason": reason,
+                        })),
+                        ..Default::default()
+                    }),
+                ))
+            }
         }
     }
 }
@@ -774,5 +814,49 @@ impl From<ApiErrorResponse> for router_data::ErrorResponse {
             network_error_message: None,
             connector_metadata: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use common_utils::errors::ErrorSwitch;
+
+    use super::*;
+
+    #[test]
+    fn agentic_limit_exceeded_switches_to_bad_request_with_structured_extra() {
+        use api_models::errors::types::ApiErrorResponse as AER;
+
+        let err = ApiErrorResponse::AgenticLimitExceeded {
+            scope: "payment_method".to_string(),
+            period: "month".to_string(),
+            currency: "USD".to_string(),
+            used_minor: 9_500,
+            max_minor: 10_000,
+            attempted_minor: 1_000,
+            reason: "limit_exceeded".to_string(),
+        };
+
+        let switched = err.switch();
+
+        let api_error = match switched {
+            AER::BadRequest(api_error) => api_error,
+            other => panic!("expected BadRequest, got {other:?}"),
+        };
+
+        assert_eq!(api_error.sub_code, "IR");
+        assert_eq!(api_error.error_identifier, 52);
+
+        let extra = api_error.extra.expect("extra should be present");
+        let data = extra.data.expect("extra.data should be present");
+
+        assert_eq!(data["kind"], serde_json::json!("agentic_limit_exceeded"));
+        assert_eq!(data["scope"], serde_json::json!("payment_method"));
+        assert_eq!(data["period"], serde_json::json!("month"));
+        assert_eq!(data["currency"], serde_json::json!("USD"));
+        assert_eq!(data["used_minor"], serde_json::json!(9_500));
+        assert_eq!(data["max_minor"], serde_json::json!(10_000));
+        assert_eq!(data["attempted_minor"], serde_json::json!(1_000));
+        assert_eq!(data["reason"], serde_json::json!("limit_exceeded"));
     }
 }
